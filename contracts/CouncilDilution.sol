@@ -2,9 +2,9 @@
 pragma solidity ^0.5.16;
 
 import "hardhat/console.sol";
-import "@openzeppelin/contracts/access/Ownable.sol";
+import "./Owned.sol";
 
-contract CouncilDilution is Ownable {
+contract CouncilDilution is Owned {
     /* SCCP configurable values */
 
     //@notice How many seats the council should have
@@ -16,22 +16,24 @@ contract CouncilDilution is Ownable {
 
     struct ElectionLog {
         string proposalHash;
-        address[] councilMembers;
         mapping(address => uint256) votesForMember;
+        mapping(address => bool) councilMembers;
     }
 
     struct ProposalLog {
         string proposalHash;
         uint start;
         uint end;
+        bool exist;
     }
 
     struct DilutionReceipt {
+        bool exist;
         string proposalHash;
         address memberDiluted;
+        uint totalDilutionValue;
         address[] dilutors;
         mapping(address => uint) voterDilutions;
-        uint totalDilutionValue;
     }
 
     mapping(string => ElectionLog) electionHashToLog;
@@ -53,18 +55,17 @@ contract CouncilDilution is Ownable {
 
     event ProposalLogged(string proposalHash, uint start, uint end);
 
-    event DilutionCreated(string proposalHash, DilutionReceipt receipt);
+    event DilutionCreated(string proposalHash, address memberDiluted, uint totalDilutionValue);
 
-    event DilutionReverted(string proposalHash, DilutionReceipt receipt);
+    event DilutionReverted(string proposalHash, address memberDiluted, uint totalDilutionValue);
 
     event SeatsModified(uint previousNumberOfSeats, uint newNumberOfSeats);
 
     event ProposalPeriodModified(uint previousProposalPeriod, uint newProposalPeriod);
 
-    constructor(uint256 _numOfSeats) public {
+    constructor(uint256 _numOfSeats) public Owned(msg.sender) {
         numOfSeats = _numOfSeats;
         proposalPeriod = 3 days;
-        transferOwnership(msg.sender);
     }
 
     //@notice
@@ -75,12 +76,12 @@ contract CouncilDilution is Ownable {
         address[] memory nomineesVotedFor,
         uint256[] memory assignedVoteWeights
     ) public returns (string memory) {
-        require(nominatedCouncilMembers.length == _numOfSeats - 1, "invalid number of council members");
+        require(nominatedCouncilMembers.length == numOfSeats - 1, "invalid number of council members");
         require(voters.length > 0, "empty voters array provided");
         require(nomineesVotedFor.length > 0, "empty nomineesVotedFor array provided");
         require(assignedVoteWeights.length > 0, "empty assignedVoteWeights array provided");
 
-        ElectionLog memory newElectionLog = ElectionLog(proposalHash, nominatedCouncilMembers);
+        ElectionLog memory newElectionLog = ElectionLog(electionHash);
 
         electionHashToLog[electionHash] = newElectionLog;
 
@@ -93,6 +94,7 @@ contract CouncilDilution is Ownable {
             electionHashToLog[electionHash].votesForMember[nominatedCouncilMembers[j]] = latestVotingWeight[
                 nominatedCouncilMembers[j]
             ];
+            electionHashToLog[electionHash].councilMembers[nominatedCouncilMembers[j]] = true;
         }
 
         latestElectionHash = electionHash;
@@ -106,8 +108,8 @@ contract CouncilDilution is Ownable {
         string memory proposalHash,
         uint start,
         uint end
-    ) returns (string memory) {
-        ProposalLog newProposalLog = ProposalLog(proposalHash, start, end);
+    ) public returns (string memory) {
+        ProposalLog memory newProposalLog = ProposalLog(proposalHash, start, end, true);
 
         proposalHashToLog[proposalHash] = newProposalLog;
 
@@ -116,83 +118,94 @@ contract CouncilDilution is Ownable {
         return proposalHash;
     }
 
-    function dilute(string memory proposalHash, address memory memberToDilute) public {
+    function dilute(string memory proposalHash, address memberToDilute) public {
         require(msg.sender != address(0), "sender must be a valid address");
         require(memberToDilute != address(0), "member to dilute must be a valid address");
         require(
-            electionHashToLog[latestElectionHash].votesForMember[memberToDilute],
+            electionHashToLog[latestElectionHash].councilMembers[memberToDilute],
             "member to dilute must be a nominated council member"
         );
-        require(proposalHashToLog[proposalHash], "proposal does not exist");
-        require(latestDelegatedVoteWeight[msg.sender][memberToDilute], "sender has not delegated voting weight for member");
-        require(block.now > proposalHashToLog[proposalHash].start, "proposal voting has not started");
-        require(block.now < proposalHashToLog[proposalHash].end, "proposal voting has ended");
+        require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
+        require(
+            latestDelegatedVoteWeight[msg.sender][memberToDilute] > 0,
+            "sender has not delegated voting weight for member"
+        );
+        require(block.timestamp > proposalHashToLog[proposalHash].start, "proposal voting has not started");
+        require(block.timestamp < proposalHashToLog[proposalHash].end, "proposal voting has ended");
 
-        if (proposalHashToDilution[proposalHash][memberToDilute]) {
-            DilutionReceipt receipt = proposalHashToDilution[proposalHash][memberToDilute];
+        if (proposalHashToDilution[proposalHash][memberToDilute].exist) {
+            DilutionReceipt storage receipt = proposalHashToDilution[proposalHash][memberToDilute];
             receipt.dilutors.push(msg.sender);
             receipt.voterDilutions[msg.sender] = latestVotingWeight[msg.sender];
 
             receipt.totalDilutionValue = receipt.totalDilutionValue + latestVotingWeight[msg.sender];
 
-            emit DilutionCreated(proposalHash, receipt);
+            emit DilutionCreated(proposalHash, receipt.memberDiluted, receipt.totalDilutionValue);
         } else {
-            DilutionReceipt memory newDilutionReceipt = DilutionReceipt(proposalHash, memberToDilute);
+            address[] memory dilutors;
+            DilutionReceipt memory newDilutionReceipt = DilutionReceipt(true, proposalHash, memberToDilute, 0, dilutors);
+
             proposalHashToDilution[proposalHash][memberToDilute] = newDilutionReceipt;
+
             proposalHashToDilution[proposalHash][memberToDilute].dilutors.push(msg.sender);
             proposalHashToDilution[proposalHash][memberToDilute].voterDilutions[msg.sender] = latestVotingWeight[msg.sender];
 
-            receipt.totalDilutionValue = latestVotingWeight[msg.sender];
+            proposalHashToDilution[proposalHash][memberToDilute].totalDilutionValue = latestVotingWeight[msg.sender];
 
-            emit DilutionCreated(proposalHash, newDilutionReceipt);
+            emit DilutionCreated(proposalHash, newDilutionReceipt.memberDiluted, newDilutionReceipt.totalDilutionValue);
         }
     }
 
-    function invalidateDilution(string memory proposalHash, address memory memberToUndilute) public {
+    function invalidateDilution(string memory proposalHash, address memberToUndilute) public {
         require(msg.sender != address(0), "sender must be a valid address");
         require(memberToUndilute != address(0), "member to undilute must be a valid address");
-        require(proposalHashToLog[proposalHash], "proposal does not exist");
+        require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
         require(
-            proposalHashToDilution[proposalHash][memberToDilute],
+            proposalHashToDilution[proposalHash][memberToUndilute].totalDilutionValue > 0,
             "dilution receipt does not exist for this member and proposal hash"
         );
 
-        DilutionReceipt receipt = proposalHashToDilution[proposalHash][memberToDilute];
+        DilutionReceipt storage receipt = proposalHashToDilution[proposalHash][memberToUndilute];
 
         uint originalDilutionValue = receipt.voterDilutions[msg.sender];
 
-        delete receipt.dilutors[msg.sender];
+        for (uint i = 0; i < receipt.dilutors.length; i++) {
+            if (receipt.dilutors[i] == msg.sender) {
+                delete receipt.dilutors[i];
+                break;
+            }
+        }
         receipt.voterDilutions[msg.sender] = 0;
         receipt.totalDilutionValue = receipt.totalDilutionValue - originalDilutionValue;
 
-        emit DilutionReverted(proposalHash, receipt);
+        emit DilutionReverted(proposalHash, receipt.memberDiluted, receipt.totalDilutionValue);
     }
 
     // Views
-    function getDilutedWeightForProposal(string memory proposalHash, address councilMember) view returns (uint) {
-        require(proposalHashToLog[proposalHash], "proposal does not exist");
+    function getDilutedWeightForProposal(string memory proposalHash, address councilMember) public view returns (uint) {
+        require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
         require(
-            electionHashToLog[latestElectionHash].votesForMember[councilMember],
+            electionHashToLog[latestElectionHash].councilMembers[councilMember],
             "address must be a nominated council member"
         );
 
         uint originalWeight = electionHashToLog[latestElectionHash].votesForMember[councilMember];
-        uint penaltyValue = proposalHashToDilution[proposalHash][memberToDilute].totalDilutionValue;
+        uint penaltyValue = proposalHashToDilution[proposalHash][councilMember].totalDilutionValue;
 
         return (originalWeight / penaltyValue) / originalWeight;
     }
 
     // Restricted functions
 
-    function modifySeats(uint _numOfSeats) public onlyOwner() returns (bool) {
-        require(numberOfSeats > 0, "number of seats must be greater than zero");
-        uint oldNumOfSeats = currentNumOfSeats;
+    function modifySeats(uint _numOfSeats) public onlyOwner() {
+        require(_numOfSeats > 0, "number of seats must be greater than zero");
+        uint oldNumOfSeats = numOfSeats;
         numOfSeats = _numOfSeats;
 
         emit SeatsModified(oldNumOfSeats, numOfSeats);
     }
 
-    function modifyProposalPeriod(uint _proposalPeriod) {
+    function modifyProposalPeriod(uint _proposalPeriod) public onlyOwner() {
         uint oldProposalPeriod = proposalPeriod;
         proposalPeriod = _proposalPeriod;
 
