@@ -4,47 +4,78 @@ pragma solidity ^0.5.16;
 import "hardhat/console.sol";
 import "./Owned.sol";
 
+/// @title A contract that allows for the dilution of Spartan Council voting weights
+/// @author @andytcf
+/// @notice This is intended to be used on the Optimistic L2 network
 contract CouncilDilution is Owned {
     /* SCCP configurable values */
 
-    //@notice How many seats the council should have
+    // @notice How many seats there currently are on the Spartan Council
     uint public numOfSeats;
 
+    // @notice The length of a proposal (SCCP/SIP) voting period
     uint public proposalPeriod;
 
+    /* Global variables */
+
+    // @notice The ipfs hash of the latest Spartan Council election proposal
     string public latestElectionHash;
 
     struct ElectionLog {
-        string proposalHash;
+        // @notice The ipfs hash of a particular Spartan Council election proposal
+        string electionHash;
+        // @notice A mapping of the votes allocated to each of the Spartan Council members
         mapping(address => uint256) votesForMember;
+        // @notice A mapping to check whether an address was an elected Council member in this election
         mapping(address => bool) councilMembers;
+        // @notice The timestamp which the election log was stored
+        uint created;
     }
 
     struct ProposalLog {
+        // @notice The ipfs hash of a particular SCCP/SIP proposal
         string proposalHash;
+        //  @notice The timestamp which the voting period begins
         uint start;
+        // @notice The timestamp which the voting period of the proposal ends
         uint end;
+        // @notice A boolean value to check whether a proposal log exists
         bool exist;
     }
 
     struct DilutionReceipt {
-        bool exist;
+        // @notice The ipfs hash of the proposal which the dilution happened on
         string proposalHash;
+        // @notice The address of the council member diluted
         address memberDiluted;
+        // @notice The total amount in which the council member was diluted by
         uint totalDilutionValue;
+        // @notice A list of dilutors
         address[] dilutors;
+        // @notice A mapping to show the value of dilution per dilutor
         mapping(address => uint) voterDilutions;
+        // @notice A flag value to check whether a dilution exist
+        bool exist;
     }
 
+    // @notice Given a election hash, return the ElectionLog struct associated
     mapping(string => ElectionLog) electionHashToLog;
-    //@notice Given a voter and a council member, check their weight
+
+    // @notice Given a voter address and a council member address, return the delegated vote weight for the most recent Spartan Council election
     mapping(address => mapping(address => uint256)) latestDelegatedVoteWeight;
+
+    // @notice Given a council member address, return the total delegated vote weight for the most recent Spartan Council election
     mapping(address => uint256) latestVotingWeight;
 
+    // @notice Given a proposal hash (SCCP/SIP), return the ProposalLog struct associated
     mapping(string => ProposalLog) proposalHashToLog;
-    //@notice Given a proposal hash and a council member, check if they have been diluted
-    mapping(string => mapping(address => DilutionReceipt)) proposalHashToDilution;
 
+    // @notice Given a proposal hash and a council member, return the DilutionReceipt if it exists
+    mapping(string => mapping(address => DilutionReceipt)) proposalHashToMemberDilution;
+
+    /* Events */
+
+    // @notice An event emitted when a new ElectionLog is created
     event ElectionLogged(
         string electionHash,
         address[] nominatedCouncilMembers,
@@ -53,22 +84,32 @@ contract CouncilDilution is Owned {
         uint256[] assignedVoteWeights
     );
 
+    // @notice An event emitted when a new ProposalLog is created
     event ProposalLogged(string proposalHash, uint start, uint end);
 
+    // @notice An event emitted when a new DilutionReceipt is created
     event DilutionCreated(string proposalHash, address memberDiluted, uint totalDilutionValue);
 
-    event DilutionReverted(string proposalHash, address memberDiluted, uint totalDilutionValue);
+    // @notice An event emitted when a DilutionReceipt is modified
+    event DilutionModified(string proposalHash, address memberDiluted, uint totalDilutionValue);
 
+    // @notice An event emitted when the number of council seats is modified
     event SeatsModified(uint previousNumberOfSeats, uint newNumberOfSeats);
 
+    // @notice An event emitted when the proposal period is modified
     event ProposalPeriodModified(uint previousProposalPeriod, uint newProposalPeriod);
 
+    /* */
+
+    // @notice Initialises the contract with a X number of council seats and a proposal period of 3 days
     constructor(uint256 _numOfSeats) public Owned(msg.sender) {
         numOfSeats = _numOfSeats;
         proposalPeriod = 3 days;
     }
 
-    //@notice
+    /* Mutative Functions */
+
+    // @notice A function to create a new ElectionLog, this is called to record the result of a Spartan Council election
     function logElection(
         string memory electionHash,
         address[] memory nominatedCouncilMembers,
@@ -81,7 +122,7 @@ contract CouncilDilution is Owned {
         require(nomineesVotedFor.length > 0, "empty nomineesVotedFor array provided");
         require(assignedVoteWeights.length > 0, "empty assignedVoteWeights array provided");
 
-        ElectionLog memory newElectionLog = ElectionLog(electionHash);
+        ElectionLog memory newElectionLog = ElectionLog(electionHash, now);
 
         electionHashToLog[electionHash] = newElectionLog;
 
@@ -104,11 +145,10 @@ contract CouncilDilution is Owned {
         return electionHash;
     }
 
-    function logProposal(
-        string memory proposalHash,
-        uint start,
-        uint end
-    ) public returns (string memory) {
+    // @notice A function to created a new ProposalLog, this is called to record SCCP/SIPS created and allow for dilution to occur per proposal.
+    function logProposal(string memory proposalHash, uint start) public returns (string memory) {
+        uint end = start + proposalPeriod;
+
         ProposalLog memory newProposalLog = ProposalLog(proposalHash, start, end, true);
 
         proposalHashToLog[proposalHash] = newProposalLog;
@@ -118,6 +158,7 @@ contract CouncilDilution is Owned {
         return proposalHash;
     }
 
+    // @notice A function to dilute a council member's voting weight for a particular proposal
     function dilute(string memory proposalHash, address memberToDilute) public {
         require(msg.sender != address(0), "sender must be a valid address");
         require(memberToDilute != address(0), "member to dilute must be a valid address");
@@ -133,8 +174,8 @@ contract CouncilDilution is Owned {
         require(block.timestamp > proposalHashToLog[proposalHash].start, "proposal voting has not started");
         require(block.timestamp < proposalHashToLog[proposalHash].end, "proposal voting has ended");
 
-        if (proposalHashToDilution[proposalHash][memberToDilute].exist) {
-            DilutionReceipt storage receipt = proposalHashToDilution[proposalHash][memberToDilute];
+        if (proposalHashToMemberDilution[proposalHash][memberToDilute].exist) {
+            DilutionReceipt storage receipt = proposalHashToMemberDilution[proposalHash][memberToDilute];
             receipt.dilutors.push(msg.sender);
             receipt.voterDilutions[msg.sender] = latestVotingWeight[msg.sender];
 
@@ -143,29 +184,32 @@ contract CouncilDilution is Owned {
             emit DilutionCreated(proposalHash, receipt.memberDiluted, receipt.totalDilutionValue);
         } else {
             address[] memory dilutors;
-            DilutionReceipt memory newDilutionReceipt = DilutionReceipt(true, proposalHash, memberToDilute, 0, dilutors);
+            DilutionReceipt memory newDilutionReceipt = DilutionReceipt(proposalHash, memberToDilute, 0, dilutors, true);
 
-            proposalHashToDilution[proposalHash][memberToDilute] = newDilutionReceipt;
+            proposalHashToMemberDilution[proposalHash][memberToDilute] = newDilutionReceipt;
 
-            proposalHashToDilution[proposalHash][memberToDilute].dilutors.push(msg.sender);
-            proposalHashToDilution[proposalHash][memberToDilute].voterDilutions[msg.sender] = latestVotingWeight[msg.sender];
+            proposalHashToMemberDilution[proposalHash][memberToDilute].dilutors.push(msg.sender);
+            proposalHashToMemberDilution[proposalHash][memberToDilute].voterDilutions[msg.sender] = latestVotingWeight[
+                msg.sender
+            ];
 
-            proposalHashToDilution[proposalHash][memberToDilute].totalDilutionValue = latestVotingWeight[msg.sender];
+            proposalHashToMemberDilution[proposalHash][memberToDilute].totalDilutionValue = latestVotingWeight[msg.sender];
 
             emit DilutionCreated(proposalHash, newDilutionReceipt.memberDiluted, newDilutionReceipt.totalDilutionValue);
         }
     }
 
+    // @notice A function that allows a voter to undo a dilution
     function invalidateDilution(string memory proposalHash, address memberToUndilute) public {
         require(msg.sender != address(0), "sender must be a valid address");
         require(memberToUndilute != address(0), "member to undilute must be a valid address");
         require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
         require(
-            proposalHashToDilution[proposalHash][memberToUndilute].totalDilutionValue > 0,
+            proposalHashToMemberDilution[proposalHash][memberToUndilute].totalDilutionValue > 0,
             "dilution receipt does not exist for this member and proposal hash"
         );
 
-        DilutionReceipt storage receipt = proposalHashToDilution[proposalHash][memberToUndilute];
+        DilutionReceipt storage receipt = proposalHashToMemberDilution[proposalHash][memberToUndilute];
 
         uint originalDilutionValue = receipt.voterDilutions[msg.sender];
 
@@ -178,10 +222,12 @@ contract CouncilDilution is Owned {
         receipt.voterDilutions[msg.sender] = 0;
         receipt.totalDilutionValue = receipt.totalDilutionValue - originalDilutionValue;
 
-        emit DilutionReverted(proposalHash, receipt.memberDiluted, receipt.totalDilutionValue);
+        emit DilutionModified(proposalHash, receipt.memberDiluted, receipt.totalDilutionValue);
     }
 
-    // Views
+    /* Views */
+
+    // @notice A view function that calculates the council member voting weight for a proposal after any dilution penalties
     function getDilutedWeightForProposal(string memory proposalHash, address councilMember) public view returns (uint) {
         require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
         require(
@@ -190,13 +236,14 @@ contract CouncilDilution is Owned {
         );
 
         uint originalWeight = electionHashToLog[latestElectionHash].votesForMember[councilMember];
-        uint penaltyValue = proposalHashToDilution[proposalHash][councilMember].totalDilutionValue;
+        uint penaltyValue = proposalHashToMemberDilution[proposalHash][councilMember].totalDilutionValue;
 
         return (originalWeight / penaltyValue) / originalWeight;
     }
 
-    // Restricted functions
+    /* Restricted Functions */
 
+    // @notice A function that can only be called by the owner that changes the number of seats on the Spartan Council
     function modifySeats(uint _numOfSeats) public onlyOwner() {
         require(_numOfSeats > 0, "number of seats must be greater than zero");
         uint oldNumOfSeats = numOfSeats;
@@ -205,6 +252,7 @@ contract CouncilDilution is Owned {
         emit SeatsModified(oldNumOfSeats, numOfSeats);
     }
 
+    // @notice A function that can only be called by the owner that changes the proposal voting period length
     function modifyProposalPeriod(uint _proposalPeriod) public onlyOwner() {
         uint oldProposalPeriod = proposalPeriod;
         proposalPeriod = _proposalPeriod;
