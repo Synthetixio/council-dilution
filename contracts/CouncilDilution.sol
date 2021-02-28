@@ -30,6 +30,7 @@ contract CouncilDilution is Owned {
         mapping(address => bool) councilMembers;
         // @notice The timestamp which the election log was stored
         uint created;
+        bool exist;
     }
 
     struct ProposalLog {
@@ -62,10 +63,10 @@ contract CouncilDilution is Owned {
     mapping(string => ElectionLog) electionHashToLog;
 
     // @notice Given a voter address and a council member address, return the delegated vote weight for the most recent Spartan Council election
-    mapping(address => mapping(address => uint256)) latestDelegatedVoteWeight;
+    mapping(address => mapping(address => uint256)) public latestDelegatedVoteWeight;
 
     // @notice Given a council member address, return the total delegated vote weight for the most recent Spartan Council election
-    mapping(address => uint256) latestVotingWeight;
+    mapping(address => uint256) public latestVotingWeight;
 
     // @notice Given a proposal hash (SCCP/SIP), return the ProposalLog struct associated
     mapping(string => ProposalLog) proposalHashToLog;
@@ -110,27 +111,36 @@ contract CouncilDilution is Owned {
     /* Mutative Functions */
 
     // @notice A function to create a new ElectionLog, this is called to record the result of a Spartan Council election
+    // @param electionHash The ipfs hash of the Spartan Council election proposal to log
+    // @param nominatedCouncilMembers The array of the successful Spartan Council nominees addresses, must be the same length as the numOfSeats
+    // @param voters An ordered array of all the voter's addresses corresponding to `nomineesVotedFor`, `assignedVoteWeights`
+    // @param nomineesVotedFor An ordered array of all the nominee address that received votes corresponding to `voters`, `assignedVoteWeights`
+    // @param assignedVoteWeights An ordered array of the voting weights corresponding to `voters`, `nomineesVotedFor`
     function logElection(
         string memory electionHash,
         address[] memory nominatedCouncilMembers,
         address[] memory voters,
         address[] memory nomineesVotedFor,
         uint256[] memory assignedVoteWeights
-    ) public returns (string memory) {
-        require(nominatedCouncilMembers.length == numOfSeats - 1, "invalid number of council members");
+    ) public onlyOwner() returns (string memory) {
+        require(bytes(electionHash).length > 0, "empty election hash provided");
+        require(!electionHashToLog[electionHash].exist, "election hash already exists");
         require(voters.length > 0, "empty voters array provided");
         require(nomineesVotedFor.length > 0, "empty nomineesVotedFor array provided");
         require(assignedVoteWeights.length > 0, "empty assignedVoteWeights array provided");
+        require(nominatedCouncilMembers.length == numOfSeats, "invalid number of council members");
 
-        ElectionLog memory newElectionLog = ElectionLog(electionHash, now);
+        ElectionLog memory newElectionLog = ElectionLog(electionHash, now, true);
 
         electionHashToLog[electionHash] = newElectionLog;
 
+        // store the voting history for calculating the allocated voting weights
         for (uint256 i = 0; i < voters.length; i++) {
             latestDelegatedVoteWeight[voters[i]][nomineesVotedFor[i]] = assignedVoteWeights[i];
             latestVotingWeight[nomineesVotedFor[i]] = assignedVoteWeights[i];
         }
 
+        // store the total weight of each successful council member
         for (uint256 j = 0; j < nominatedCouncilMembers.length; j++) {
             electionHashToLog[electionHash].votesForMember[nominatedCouncilMembers[j]] = latestVotingWeight[
                 nominatedCouncilMembers[j]
@@ -147,6 +157,9 @@ contract CouncilDilution is Owned {
 
     // @notice A function to created a new ProposalLog, this is called to record SCCP/SIPS created and allow for dilution to occur per proposal.
     function logProposal(string memory proposalHash, uint start) public returns (string memory) {
+        require(!proposalHashToLog[proposalHash].exist, "proposal hash is not unique");
+        require(bytes(proposalHash).length > 0, "proposal hash must not be empty");
+
         uint end = start + proposalPeriod;
 
         ProposalLog memory newProposalLog = ProposalLog(proposalHash, start, end, true);
