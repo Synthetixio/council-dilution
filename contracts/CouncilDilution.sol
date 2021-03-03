@@ -1,6 +1,7 @@
 //SPDX-License-Identifier: Unlicense
 pragma solidity ^0.5.16;
 
+import "hardhat/console.sol";
 import "./Owned.sol";
 import "./SafeDecimalMath.sol";
 
@@ -136,7 +137,6 @@ contract CouncilDilution is Owned {
         uint[] memory assignedVoteWeights
     ) public onlyOwner() returns (string memory) {
         require(bytes(electionHash).length > 0, "empty election hash provided");
-        require(!electionHashToLog[electionHash].exist, "election hash already exists");
         require(voters.length > 0, "empty voters array provided");
         require(nomineesVotedFor.length > 0, "empty nomineesVotedFor array provided");
         require(assignedVoteWeights.length > 0, "empty assignedVoteWeights array provided");
