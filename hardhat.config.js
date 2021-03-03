@@ -48,6 +48,12 @@ module.exports = {
 				mnemonic: process.env.KOVAN_PRIVATE_KEY,
 			},
 		},
+		// Gas settings configured for L2 block sizing
+		hardhat: {
+			gas: 8e6,
+			blockGasLimit: 8e6,
+			allowUnlimitedContractSize: false,
+		},
 	},
 	etherscan: {
 		// Your API key for Etherscan
