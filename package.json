@@ -5,7 +5,9 @@
 	"main": "index.js",
 	"scripts": {
 		"test": "echo \"Error: no test specified\" && exit 1",
-		"prettier": "prettier --write 'contracts/**/*.sol'"
+		"prettier": "prettier --write 'contracts/**/*.sol'",
+		"kovan-deploy": "npx hardhat run scripts/deployment.js --network kovan",
+		"kovan-verify": "npx hardhat verify --network kovan 0xd793d97DbB6fD38b30C89B628b98b3c33952f99B '8'"
 	},
 	"repository": {
 		"type": "git",

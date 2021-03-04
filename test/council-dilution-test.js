@@ -7,6 +7,7 @@ describe('CouncilDilution', () => {
 	let dilution;
 	let electionHash;
 	let proposalHash;
+	let proposalTwoHash;
 	let nominatedCouncilMembers;
 	let voters;
 	let nomineesVotedFor;
@@ -50,6 +51,7 @@ describe('CouncilDilution', () => {
 
 		electionHash = 'QWERTY';
 		proposalHash = 'UIOP';
+		proposalTwoHash = 'ABCDEF';
 		INVALID_PROPOSAL_HASH = 'INVALID_PROPOSAL';
 
 		nominatedCouncilMembers = [memberOne.address, memberTwo.address];
@@ -251,6 +253,40 @@ describe('CouncilDilution', () => {
 
 			expect(latestVotingWeight).to.equal(0);
 		});
+
+		it('should return the zeroAddress if the user has not voted for a member', async () => {
+			await dilution.logElection(
+				electionHash,
+				nominatedCouncilMembers,
+				voters,
+				nomineesVotedFor,
+				assignedVoteWeights
+			);
+
+			const electionMemberVotedFor = await dilution.electionMemberVotedFor(
+				electionHash,
+				nomineeOne.address
+			);
+
+			expect(electionMemberVotedFor).to.equal(ethers.constants.AddressZero);
+		});
+
+		it('should return the address for the member the user has voted for', async () => {
+			await dilution.logElection(
+				electionHash,
+				nominatedCouncilMembers,
+				voters,
+				nomineesVotedFor,
+				assignedVoteWeights
+			);
+
+			const electionMemberVotedFor = await dilution.electionMemberVotedFor(
+				electionHash,
+				voterOne.address
+			);
+
+			expect(electionMemberVotedFor).to.equal(memberOne.address);
+		});
 	});
 
 	describe('when logging a proposal', () => {
@@ -393,6 +429,17 @@ describe('CouncilDilution', () => {
 			expect(voterOneDilution).to.equal(assignedVoteWeights[0]);
 			expect(voterFiveDilution).to.equal(assignedVoteWeights[4]);
 		});
+
+		it('should return true for hasAddressDilutedForProposal', async () => {
+			await dilution.connect(voterOne).dilute(proposalHash, memberOne.address);
+
+			const hasDiluted = await dilution.hasAddressDilutedForProposal(
+				proposalHash,
+				voterOne.address
+			);
+
+			expect(hasDiluted).to.equal(true);
+		});
 	});
 
 	describe('when undoing a dilution', () => {
@@ -476,6 +523,46 @@ describe('CouncilDilution', () => {
 			expect(dilutors.length).to.equal(1);
 			expect(voterOneDilution).to.equal(0);
 			expect(voterFiveDilution).to.equal(10);
+		});
+
+		it('should return false for hasAddressDilutedForProposal', async () => {
+			await dilution.connect(voterOne).invalidateDilution(proposalHash, memberOne.address);
+
+			const hasDiluted = await dilution.hasAddressDilutedForProposal(
+				proposalHash,
+				voterOne.address
+			);
+
+			expect(hasDiluted).to.equal(false);
+		});
+	});
+
+	describe('when validating a list of proposal hashes', () => {
+		beforeEach(async () => {
+			await dilution.logElection(
+				electionHash,
+				nominatedCouncilMembers,
+				voters,
+				nomineesVotedFor,
+				assignedVoteWeights
+			);
+
+			await dilution.logProposal(proposalHash, start);
+			await dilution.logProposal(proposalTwoHash, start);
+		});
+
+		it('should return the correct number', async () => {
+			const validHashes = await dilution.getValidProposals([proposalHash, proposalTwoHash]);
+
+			expect(validHashes[0]).to.equal(proposalHash);
+			expect(validHashes[1]).to.equal(proposalTwoHash);
+		});
+
+		it('should return the correct number for invalid and valid proposals', async () => {
+			const validHashes = await dilution.getValidProposals([INVALID_PROPOSAL_HASH, proposalHash]);
+
+			expect(validHashes[0]).to.equal('');
+			expect(validHashes[1]).to.equal(proposalHash);
 		});
 	});
 

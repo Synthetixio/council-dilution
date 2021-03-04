@@ -1,6 +1,8 @@
 //SPDX-License-Identifier: Unlicense
 pragma solidity ^0.5.16;
 
+pragma experimental ABIEncoderV2;
+
 import "hardhat/console.sol";
 import "./Owned.sol";
 import "./SafeDecimalMath.sol";
@@ -70,6 +72,12 @@ contract CouncilDilution is Owned {
 
     // @notice Given a council member address, return the total delegated vote weight for the most recent Spartan Council election
     mapping(address => uint) public latestVotingWeight;
+
+    // @notice Given a propoal hash and a voting address, find out the member the user has voted for
+    mapping(string => mapping(address => address)) public electionMemberVotedFor;
+
+    // @notice Given a proposal hash and a voting address, find if a member has diluted
+    mapping(string => mapping(address => bool)) public hasAddressDilutedForProposal;
 
     // @notice Given a proposal hash (SCCP/SIP), return the ProposalLog struct associated
     mapping(string => ProposalLog) public proposalHashToLog;
@@ -150,6 +158,7 @@ contract CouncilDilution is Owned {
         for (uint i = 0; i < voters.length; i++) {
             latestDelegatedVoteWeight[voters[i]][nomineesVotedFor[i]] = assignedVoteWeights[i];
             latestVotingWeight[nomineesVotedFor[i]] = latestVotingWeight[nomineesVotedFor[i]] + assignedVoteWeights[i];
+            electionMemberVotedFor[electionHash][voters[i]] = nomineesVotedFor[i];
         }
 
         // store the total weight of each successful council member
@@ -209,6 +218,8 @@ contract CouncilDilution is Owned {
             receipt.voterDilutions[msg.sender] = latestDelegatedVoteWeight[msg.sender][memberToDilute];
             receipt.totalDilutionValue = receipt.totalDilutionValue + latestDelegatedVoteWeight[msg.sender][memberToDilute];
 
+            hasAddressDilutedForProposal[proposalHash][msg.sender] = true;
+
             emit DilutionCreated(
                 proposalHash,
                 receipt.memberDiluted,
@@ -232,6 +243,8 @@ contract CouncilDilution is Owned {
             proposalHashToMemberDilution[proposalHash][memberToDilute].totalDilutionValue = latestDelegatedVoteWeight[
                 msg.sender
             ][memberToDilute];
+
+            hasAddressDilutedForProposal[proposalHash][msg.sender] = true;
 
             emit DilutionCreated(
                 proposalHash,
@@ -263,6 +276,8 @@ contract CouncilDilution is Owned {
 
         uint voterDilutionValue = receipt.voterDilutions[msg.sender];
 
+        hasAddressDilutedForProposal[proposalHash][msg.sender] = false;
+
         for (uint i = 0; i < receipt.dilutors.length; i++) {
             if (receipt.dilutors[i] == caller) {
                 receipt.dilutors[i] = receipt.dilutors[receipt.dilutors.length - 1];
@@ -279,6 +294,20 @@ contract CouncilDilution is Owned {
     }
 
     /* Views */
+
+    // @notice A view function that checks which proposalHashes exist on the contract and return them
+    function getValidProposals(string[] memory proposalHashes) public view returns (string[] memory) {
+        string[] memory validHashes = new string[](proposalHashes.length);
+
+        for (uint i = 0; i < proposalHashes.length; i++) {
+            string memory proposalHash = proposalHashes[i];
+            if (proposalHashToLog[proposalHash].exist) {
+                validHashes[i] = (proposalHashToLog[proposalHash].proposalHash);
+            }
+        }
+
+        return validHashes;
+    }
 
     // @notice A view function that calculates the council member voting weight for a proposal after any dilution penalties
     // @return
