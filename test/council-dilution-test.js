@@ -26,8 +26,6 @@ describe('CouncilDilution', () => {
 	let nomineeOne;
 	let nomineeTwo;
 
-	let start;
-
 	let INVALID_PROPOSAL_HASH;
 
 	beforeEach(async () => {
@@ -70,8 +68,6 @@ describe('CouncilDilution', () => {
 			memberOne.address,
 		];
 		assignedVoteWeights = [40, 30, 20, 15, 10];
-
-		start = Math.round(new Date().getTime() / 1000);
 	});
 
 	describe('Deployment', async () => {
@@ -290,41 +286,41 @@ describe('CouncilDilution', () => {
 	});
 
 	describe('when logging a proposal', () => {
-		let proposalPeriod;
-		let end;
-
-		beforeEach(async () => {
-			proposalPeriod = await dilution.proposalPeriod();
-
-			const startBN = ethers.BigNumber.from(start);
-
-			end = startBN.add(proposalPeriod);
-		});
-
 		it('should successfully log a proposal and emit event', async () => {
-			await expect(await dilution.logProposal(proposalHash, start))
-				.to.emit(dilution, 'ProposalLogged')
-				.withArgs(proposalHash, start, end);
+			await expect(await dilution.logProposal(proposalHash)).to.emit(dilution, 'ProposalLogged');
 		});
 
 		it('should be able to be called by non-owner', async () => {
-			await expect(await dilution.connect(caller).logProposal(proposalHash, start))
-				.to.emit(dilution, 'ProposalLogged')
-				.withArgs(proposalHash, start, end);
+			await expect(await dilution.connect(caller).logProposal(proposalHash)).to.emit(
+				dilution,
+				'ProposalLogged'
+			);
 		});
 
 		it('should fail if proposal hash is not unique', async () => {
-			await dilution.logProposal(proposalHash, start);
+			await dilution.logProposal(proposalHash);
 
-			await expect(dilution.logProposal(proposalHash, start)).to.be.revertedWith(
+			await expect(dilution.logProposal(proposalHash)).to.be.revertedWith(
 				'proposal hash is not unique'
 			);
 		});
 
 		it('should fail if proposal hash is empty', async () => {
-			await expect(dilution.logProposal('', start)).to.be.revertedWith(
-				'proposal hash must not be empty'
-			);
+			await expect(dilution.logProposal('')).to.be.revertedWith('proposal hash must not be empty');
+		});
+
+		it('should reflect the correct start and end timestamps', async () => {
+			const proposalPeriod = (await dilution.proposalPeriod()).toNumber();
+
+			await dilution.logProposal(proposalHash);
+
+			const proposalStruct = await dilution.proposalHashToLog(proposalHash);
+
+			const startDate = proposalStruct.start.toNumber();
+
+			const endDate = proposalStruct.end.toNumber();
+
+			expect(endDate).to.equal(startDate + proposalPeriod);
 		});
 	});
 
@@ -338,7 +334,7 @@ describe('CouncilDilution', () => {
 				assignedVoteWeights
 			);
 
-			await dilution.logProposal(proposalHash, start);
+			await dilution.logProposal(proposalHash);
 		});
 
 		it('should fail if the caller has not voted in the most recent election', async () => {
@@ -359,17 +355,15 @@ describe('CouncilDilution', () => {
 			).to.be.revertedWith('proposal does not exist');
 		});
 
-		it('should fail if the proposal voting period has not started', async () => {
-			const LATE_PROPOSAL_HASH = 'LATE_PROPOSAL';
-			await dilution.logProposal(LATE_PROPOSAL_HASH, Date.now() + 20_000_000);
-			await expect(
-				dilution.connect(voterOne).dilute(LATE_PROPOSAL_HASH, memberOne.address)
-			).to.be.revertedWith('dilution can only occur within the proposal voting period');
-		});
-
 		it('should fail if the proposal voting period has ended', async () => {
+			await dilution.modifyProposalPeriod(59); // 59 seconds
+
 			const ENDED_PROPOSAL_HASH = 'ENDED_PROPOSAL';
-			await dilution.logProposal(ENDED_PROPOSAL_HASH, Date.now() - 20_000_000);
+			await dilution.logProposal(ENDED_PROPOSAL_HASH);
+
+			ethers.provider.send('evm_increaseTime', [60]); // add 60 seconds
+			ethers.provider.send('evm_mine'); // mine the next block
+
 			await expect(
 				dilution.connect(voterOne).dilute(ENDED_PROPOSAL_HASH, memberOne.address)
 			).to.be.revertedWith('dilution can only occur within the proposal voting period');
@@ -440,6 +434,13 @@ describe('CouncilDilution', () => {
 
 			expect(hasDiluted).to.equal(true);
 		});
+
+		it('should fail if the caller has diluted already', async () => {
+			await dilution.connect(voterOne).dilute(proposalHash, memberOne.address);
+			await expect(
+				dilution.connect(voterOne).dilute(proposalHash, memberOne.address)
+			).to.be.revertedWith('sender has already diluted');
+		});
 	});
 
 	describe('when undoing a dilution', () => {
@@ -452,7 +453,7 @@ describe('CouncilDilution', () => {
 				assignedVoteWeights
 			);
 
-			await dilution.logProposal(proposalHash, start);
+			await dilution.logProposal(proposalHash);
 			await dilution.connect(voterOne).dilute(proposalHash, memberOne.address);
 		});
 
@@ -535,6 +536,30 @@ describe('CouncilDilution', () => {
 
 			expect(hasDiluted).to.equal(false);
 		});
+
+		it('should fail if the caller has undiluted already', async () => {
+			await dilution.connect(voterOne).invalidateDilution(proposalHash, memberOne.address);
+			await expect(
+				dilution.connect(voterOne).invalidateDilution(proposalHash, memberOne.address)
+			).to.be.revertedWith('voter has no dilution weight');
+		});
+
+		it('should fail if the proposal voting period has ended', async () => {
+			await dilution.modifyProposalPeriod(60); // 60 seconds
+
+			const ENDED_PROPOSAL_HASH = 'ENDED_PROPOSAL';
+
+			await dilution.logProposal(ENDED_PROPOSAL_HASH);
+
+			await dilution.connect(voterOne).dilute(ENDED_PROPOSAL_HASH, memberOne.address);
+
+			ethers.provider.send('evm_increaseTime', [60]); // add 60 seconds
+			ethers.provider.send('evm_mine'); // mine the next block
+
+			await expect(
+				dilution.connect(voterOne).invalidateDilution(ENDED_PROPOSAL_HASH, memberOne.address)
+			).to.be.revertedWith('dilution can only occur within the proposal voting period');
+		});
 	});
 
 	describe('when validating a list of proposal hashes', () => {
@@ -547,8 +572,8 @@ describe('CouncilDilution', () => {
 				assignedVoteWeights
 			);
 
-			await dilution.logProposal(proposalHash, start);
-			await dilution.logProposal(proposalTwoHash, start);
+			await dilution.logProposal(proposalHash);
+			await dilution.logProposal(proposalTwoHash);
 		});
 
 		it('should return the correct number', async () => {
@@ -576,7 +601,7 @@ describe('CouncilDilution', () => {
 				assignedVoteWeights
 			);
 
-			await dilution.logProposal(proposalHash, start);
+			await dilution.logProposal(proposalHash);
 		});
 
 		it('should return the correct dilution ratio', async () => {

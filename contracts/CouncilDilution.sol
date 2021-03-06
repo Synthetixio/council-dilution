@@ -177,9 +177,12 @@ contract CouncilDilution is Owned {
     }
 
     // @notice A function to created a new ProposalLog, this is called to record SCCP/SIPS created and allow for dilution to occur per proposal.
-    function logProposal(string memory proposalHash, uint start) public returns (string memory) {
+    // @params proposalHash the ipfs hash of the proposal to be logged
+    function logProposal(string memory proposalHash) public returns (string memory) {
         require(!proposalHashToLog[proposalHash].exist, "proposal hash is not unique");
         require(bytes(proposalHash).length > 0, "proposal hash must not be empty");
+
+        uint start = now;
 
         uint end = start + proposalPeriod;
 
@@ -204,10 +207,8 @@ contract CouncilDilution is Owned {
             latestDelegatedVoteWeight[msg.sender][memberToDilute] > 0,
             "sender has not delegated voting weight for member"
         );
-        require(
-            now >= proposalHashToLog[proposalHash].start && now < proposalHashToLog[proposalHash].end,
-            "dilution can only occur within the proposal voting period"
-        );
+        require(now < proposalHashToLog[proposalHash].end, "dilution can only occur within the proposal voting period");
+        require(hasAddressDilutedForProposal[proposalHash][msg.sender] == false, "sender has already diluted");
 
         if (proposalHashToMemberDilution[proposalHash][memberToDilute].exist) {
             DilutionReceipt storage receipt = proposalHashToMemberDilution[proposalHash][memberToDilute];
@@ -264,9 +265,11 @@ contract CouncilDilution is Owned {
             "dilution receipt does not exist for this member and proposal hash"
         );
         require(
-            proposalHashToMemberDilution[proposalHash][memberToUndilute].voterDilutions[msg.sender] > 0,
+            proposalHashToMemberDilution[proposalHash][memberToUndilute].voterDilutions[msg.sender] > 0 &&
+                hasAddressDilutedForProposal[proposalHash][msg.sender] == true,
             "voter has no dilution weight"
         );
+        require(now < proposalHashToLog[proposalHash].end, "undo dilution can only occur within the proposal voting period");
 
         address caller = msg.sender;
 
