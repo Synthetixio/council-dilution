@@ -3,36 +3,29 @@ require('@nomiclabs/hardhat-solhint');
 require('@nomiclabs/hardhat-etherscan');
 require('solidity-coverage');
 require('dotenv').config();
-
 // This is a sample Hardhat task. To learn how to create your own go to
 // https://hardhat.org/guides/create-task.html
 // task('accounts', 'Prints the list of accounts', async () => {
 // 	const accounts = await ethers.getSigners();
-
 // 	for (const account of accounts) {
 // 		console.log(account.address);
 // 	}
 // });
-
+const GAS_PRICE = 150e9; // 150 GWEI
 task('compile')
 	.addFlag('useOvm', 'Compile with the OVM Solidity compiler')
 	.setAction(async (taskArguments, hre, runSuper) => {
 		if (taskArguments.useOvm) {
 			require('@eth-optimism/plugins/hardhat/compiler');
 		}
-
 		if (taskArguments.native) {
 			hre.config.solc.native = true;
 		}
-
 		// optimizeIfRequired({ hre, taskArguments });
-
 		await runSuper(taskArguments);
 	});
-
 // You need to export an object to set up your config
 // Go to https://hardhat.org/config/ to learn more
-
 /**
  * @type import('hardhat/config').HardhatUserConfig
  */
@@ -47,6 +40,11 @@ module.exports = {
 			accounts: {
 				mnemonic: process.env.KOVAN_PRIVATE_KEY,
 			},
+		},
+		mainnet: {
+			url: `https://mainnet.infura.io/v3/${process.env.INFURA_KEY}`,
+			accounts: [`${process.env.DEPLOY_PRIVATE_KEY}`],
+			gasPrice: GAS_PRICE,
 		},
 		// Gas settings configured for L2 block sizing
 		hardhat: {
