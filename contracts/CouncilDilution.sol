@@ -7,15 +7,16 @@ import "hardhat/console.sol";
 import "./Owned.sol";
 import "./SafeDecimalMath.sol";
 
-/// @title A contract that allows for the dilution of Spartan Council voting weights
-/// @author @andytcf
-/// @notice This is intended to be used on the Optimistic L2 network
+/**
+@title A contract that allows for the dilution of Spartan Council voting weights
+@author @andytcf
+ */
 contract CouncilDilution is Owned {
     using SafeDecimalMath for uint;
 
     /* SCCP configurable values */
 
-    // @notice How many seats there currently are on the Spartan Council
+    // @notice How many seats on the Spartan Council
     uint public numOfSeats;
 
     // @notice The length of a proposal (SCCP/SIP) voting period
@@ -35,7 +36,6 @@ contract CouncilDilution is Owned {
         mapping(address => bool) councilMembers;
         // @notice The timestamp which the election log was stored
         uint created;
-        bool exist;
     }
 
     struct ProposalLog {
@@ -131,12 +131,15 @@ contract CouncilDilution is Owned {
 
     /* Mutative Functions */
 
-    // @notice A function to create a new ElectionLog, this is called to record the result of a Spartan Council election
-    // @param electionHash The ipfs hash of the Spartan Council election proposal to log
-    // @param nominatedCouncilMembers The array of the successful Spartan Council nominees addresses, must be the same length as the numOfSeats
-    // @param voters An ordered array of all the voter's addresses corresponding to `nomineesVotedFor`, `assignedVoteWeights`
-    // @param nomineesVotedFor An ordered array of all the nominee address that received votes corresponding to `voters`, `assignedVoteWeights`
-    // @param assignedVoteWeights An ordered array of the voting weights corresponding to `voters`, `nomineesVotedFor`
+    /**
+    @notice A function to create a new ElectionLog, this is called to record the result of a Spartan Council election
+    @param electionHash The ipfs hash of the Spartan Council election proposal to log
+    @param nominatedCouncilMembers The array of the successful Spartan Council nominees addresses, must be the same length as the numOfSeats
+    @param voters An ordered array of all the voter's addresses corresponding to `nomineesVotedFor`, `assignedVoteWeights`
+    @param nomineesVotedFor An ordered array of all the nominee address that received votes corresponding to `voters`, `assignedVoteWeights`
+    @param assignedVoteWeights An ordered array of the voting weights corresponding to `voters`, `nomineesVotedFor`
+    @return electionHash
+     */
     function logElection(
         string memory electionHash,
         address[] memory nominatedCouncilMembers,
@@ -150,7 +153,7 @@ contract CouncilDilution is Owned {
         require(assignedVoteWeights.length > 0, "empty assignedVoteWeights array provided");
         require(nominatedCouncilMembers.length == numOfSeats, "invalid number of council members");
 
-        ElectionLog memory newElectionLog = ElectionLog(electionHash, now, true);
+        ElectionLog memory newElectionLog = ElectionLog(electionHash, now);
 
         electionHashToLog[electionHash] = newElectionLog;
 
@@ -176,8 +179,11 @@ contract CouncilDilution is Owned {
         return electionHash;
     }
 
-    // @notice A function to created a new ProposalLog, this is called to record SCCP/SIPS created and allow for dilution to occur per proposal.
-    // @params proposalHash the ipfs hash of the proposal to be logged
+    /**
+    @notice A function to created a new ProposalLog, this is called to record SCCP/SIPS created and allow for dilution to occur per proposal.
+    @param proposalHash the ipfs hash of the proposal to be logged
+    @return proposalHash
+     */
     function logProposal(string memory proposalHash) public returns (string memory) {
         require(!proposalHashToLog[proposalHash].exist, "proposal hash is not unique");
         require(bytes(proposalHash).length > 0, "proposal hash must not be empty");
@@ -195,7 +201,11 @@ contract CouncilDilution is Owned {
         return proposalHash;
     }
 
-    // @notice A function to dilute a council member's voting weight for a particular proposal
+    /**
+    @notice  A function to dilute a council member's voting weight for a particular proposal
+    @param proposalHash the ipfs hash of the proposal to be logged
+    @param memberToDilute the address of the member to dilute
+     */
     function dilute(string memory proposalHash, address memberToDilute) public {
         require(memberToDilute != address(0), "member to dilute must be a valid address");
         require(
@@ -256,7 +266,11 @@ contract CouncilDilution is Owned {
         }
     }
 
-    // @notice A function that allows a voter to undo a dilution
+    /**
+    @notice  A function that allows a voter to undo a dilution
+    @param proposalHash the ipfs hash of the proposal to be logged
+    @param memberToUndilute the address of the member to undilute
+     */
     function invalidateDilution(string memory proposalHash, address memberToUndilute) public {
         require(memberToUndilute != address(0), "member to undilute must be a valid address");
         require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
@@ -298,7 +312,11 @@ contract CouncilDilution is Owned {
 
     /* Views */
 
-    // @notice A view function that checks which proposalHashes exist on the contract and return them
+    /**
+    @notice   A view function that checks which proposalHashes exist on the contract and return them
+    @param proposalHashes a array of hashes to check validity against
+    @return a array with elements either empty or with the valid proposal hash
+     */
     function getValidProposals(string[] memory proposalHashes) public view returns (string[] memory) {
         string[] memory validHashes = new string[](proposalHashes.length);
 
@@ -312,8 +330,12 @@ contract CouncilDilution is Owned {
         return validHashes;
     }
 
-    // @notice A view function that calculates the council member voting weight for a proposal after any dilution penalties
-    // @return
+    /**
+    @notice A view function that calculates the council member voting weight for a proposal after any dilution penalties
+    @param proposalHash the ipfs hash of the proposal to check dilution against
+    @param councilMember the council member to check diluted weight for 
+    @return the calculated diluted ratio (1e18)
+     */
     function getDilutedWeightForProposal(string memory proposalHash, address councilMember) public view returns (uint) {
         require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
         require(
@@ -327,7 +349,12 @@ contract CouncilDilution is Owned {
         return (originalWeight - penaltyValue).divideDecimal(originalWeight);
     }
 
-    //@notice A view helper function to get the dilutors for a particular DilutionReceipt
+    /**
+    @notice A view helper function to get the dilutors for a particular DilutionReceipt
+    @param proposalHash the ipfs hash of the proposal to get the dilution receipt for
+    @param memberDiluted the council member to get the dilution array for
+    @return a list of the voters addresses who have diluted this member for this proposal
+     */
     function getDilutorsForDilutionReceipt(string memory proposalHash, address memberDiluted)
         public
         view
@@ -336,7 +363,13 @@ contract CouncilDilution is Owned {
         return proposalHashToMemberDilution[proposalHash][memberDiluted].dilutors;
     }
 
-    // @notice A view helper function to get the weighting of a voter's dilution for a DilutionReceipt
+    /**
+    @notice A view helper function to get the weighting of a voter's dilution for a DilutionReceipt
+    @param proposalHash the ipfs hash of the proposal to get the dilution receipt for
+    @param memberDiluted the council member to check dilution weighting against
+    @param voter the voter address to get the dilution weighting for
+    @return the dilution weight of the voter, for a specific proposal and council member
+     */
     function getVoterDilutionWeightingForDilutionReceipt(
         string memory proposalHash,
         address memberDiluted,
@@ -347,7 +380,10 @@ contract CouncilDilution is Owned {
 
     /* Restricted Functions */
 
-    // @notice A function that can only be called by the owner that changes the number of seats on the Spartan Council
+    /**
+    @notice A function that can only be called by the OWNER that changes the number of seats on the Spartan Council
+    @param _numOfSeats the number of seats to set the numOfSeats to
+     */
     function modifySeats(uint _numOfSeats) public onlyOwner() {
         require(_numOfSeats > 0, "number of seats must be greater than zero");
         uint oldNumOfSeats = numOfSeats;
@@ -356,7 +392,10 @@ contract CouncilDilution is Owned {
         emit SeatsModified(oldNumOfSeats, numOfSeats);
     }
 
-    // @notice A function that can only be called by the owner that changes the proposal voting period length
+    /**
+    @notice A function that can only be called by the owner that changes the proposal voting period length
+    @param _proposalPeriod the proposal perod in seconds, to set the proposalPeriod variable to
+     */
     function modifyProposalPeriod(uint _proposalPeriod) public onlyOwner() {
         uint oldProposalPeriod = proposalPeriod;
         proposalPeriod = _proposalPeriod;
