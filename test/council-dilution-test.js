@@ -962,4 +962,72 @@ describe('CouncilDilution', () => {
 			expect(txBatch.length).to.equal(2);
 		});
 	});
+
+	describe('when logging multiple council elections', () => {
+		const electionHashOne = '1';
+		const electionHashTwo = '2';
+
+		let councilMemberOne;
+		let councilMemberTwo;
+		let councilMemberThree;
+		let councilMemberFour;
+		let voterOne;
+		let voterTwo;
+		let voterThree;
+		let voterFour;
+
+		beforeEach(async () => {
+			[
+				deployer,
+				councilMemberOne,
+				councilMemberTwo,
+				councilMemberThree,
+				councilMemberFour,
+				voterOne,
+				voterTwo,
+				voterThree,
+				voterFour,
+			] = await ethers.getSigners();
+		});
+
+		it('should retrieve dilution weights correctly after a shift in council members', async () => {
+			await dilution.logElection(
+				electionHashOne,
+				[councilMemberOne.address, councilMemberTwo.address],
+				[voterOne.address, voterTwo.address, voterThree.address],
+				[councilMemberOne.address, councilMemberTwo.address, councilMemberOne.address],
+				[40, 50, 10]
+			);
+
+			await dilution.logProposal(proposalHash);
+
+			await dilution.connect(voterOne).dilute(proposalHash, councilMemberOne.address);
+
+			const weightOfVoterOne = await dilution.getDilutedWeightForProposal(
+				proposalHash,
+				councilMemberOne.address
+			);
+
+			const weightOfVoterTwo = await dilution.getDilutedWeightForProposal(
+				proposalHash,
+				councilMemberTwo.address
+			);
+
+			await dilution.logElection(
+				electionHashTwo,
+				[councilMemberThree.address, councilMemberFour.address],
+				[voterThree.address, voterFour.address],
+				[councilMemberThree.address, councilMemberFour.address],
+				[50, 50]
+			);
+
+			expect(
+				await dilution.getDilutedWeightForProposal(proposalHash, councilMemberOne.address)
+			).to.equal(weightOfVoterOne);
+
+			expect(
+				await dilution.getDilutedWeightForProposal(proposalHash, councilMemberTwo.address)
+			).to.equal(weightOfVoterTwo);
+		});
+	});
 });

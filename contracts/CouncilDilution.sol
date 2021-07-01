@@ -41,6 +41,8 @@ contract CouncilDilution is Owned {
     struct ProposalLog {
         // @notice The ipfs hash of a particular SCCP/SIP proposal
         string proposalHash;
+        // @notice The election hash of the current epoch when the proposal was made
+        string electionHash;
         //  @notice The timestamp which the voting period begins
         uint start;
         // @notice The timestamp which the voting period of the proposal ends
@@ -97,7 +99,7 @@ contract CouncilDilution is Owned {
     );
 
     // @notice An event emitted when a new ProposalLog is created
-    event ProposalLogged(string proposalHash, uint start, uint end);
+    event ProposalLogged(string proposalHash, string electionHash, uint start, uint end);
 
     // @notice An event emitted when a new DilutionReceipt is created
     event DilutionCreated(
@@ -192,11 +194,11 @@ contract CouncilDilution is Owned {
 
         uint end = start + proposalPeriod;
 
-        ProposalLog memory newProposalLog = ProposalLog(proposalHash, start, end, true);
+        ProposalLog memory newProposalLog = ProposalLog(proposalHash, latestElectionHash, start, end, true);
 
         proposalHashToLog[proposalHash] = newProposalLog;
 
-        emit ProposalLogged(proposalHash, start, end);
+        emit ProposalLogged(proposalHash, latestElectionHash, start, end);
 
         return proposalHash;
     }
@@ -338,12 +340,12 @@ contract CouncilDilution is Owned {
      */
     function getDilutedWeightForProposal(string memory proposalHash, address councilMember) public view returns (uint) {
         require(proposalHashToLog[proposalHash].exist, "proposal does not exist");
-        require(
-            electionHashToLog[latestElectionHash].councilMembers[councilMember],
-            "address must be a nominated council member"
-        );
 
-        uint originalWeight = electionHashToLog[latestElectionHash].votesForMember[councilMember];
+        string memory electionHash = proposalHashToLog[proposalHash].electionHash;
+
+        require(electionHashToLog[electionHash].councilMembers[councilMember], "address must be a nominated council member");
+
+        uint originalWeight = electionHashToLog[electionHash].votesForMember[councilMember];
         uint penaltyValue = proposalHashToMemberDilution[proposalHash][councilMember].totalDilutionValue;
 
         return (originalWeight - penaltyValue).divideDecimal(originalWeight);
