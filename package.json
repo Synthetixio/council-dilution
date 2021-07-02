@@ -4,8 +4,8 @@
 	"description": "",
 	"main": "index.js",
 	"scripts": {
-		"test": "echo \"Error: no test specified\" && exit 1",
-		"prettier": "prettier --write 'contracts/**/*.sol'",
+		"test": "npx hardhat test",
+		"prettier": "prettier --write 'contracts/**/*.sol' && prettier --write 'test/**.js'",
 		"kovan-deploy": "npx hardhat run scripts/deployment.js --network kovan",
 		"kovan-verify": "npx hardhat verify --network kovan 0xc8ddA2B8221e35f44B771FcE6b641Aa4589D06b5 '8'",
 		"mainnet-deploy": "npx hardhat run scripts/deployment.js --network mainnet",
