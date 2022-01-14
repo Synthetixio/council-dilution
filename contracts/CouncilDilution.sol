@@ -1,13 +1,13 @@
 // File contracts/Owned.sol
 
-pragma solidity ^0.5.16;
+pragma solidity 0.7.6;
 
 // https://docs.synthetix.io/contracts/source/contracts/owned
 contract Owned {
     address public owner;
     address public nominatedOwner;
 
-    constructor(address _owner) public {
+    constructor(address _owner) {
         require(_owner != address(0), "Owner address cannot be 0");
         owner = _owner;
         emit OwnerChanged(address(0), _owner);
@@ -40,7 +40,7 @@ contract Owned {
 
 // File @openzeppelin/contracts/math/SafeMath.sol@v2.4.0
 
-pragma solidity ^0.5.0;
+pragma solidity 0.7.6;
 
 /**
  * @dev Wrappers over Solidity's arithmetic operations with added overflow
@@ -211,7 +211,7 @@ library SafeMath {
 
 // File contracts/SafeDecimalMath.sol
 
-pragma solidity ^0.5.16;
+pragma solidity 0.7.6;
 
 // Libraries
 
@@ -401,7 +401,7 @@ library SafeDecimalMath {
 // File contracts/CouncilDilution.sol
 
 //SPDX-License-Identifier: Unlicense
-pragma solidity ^0.5.16;
+pragma solidity 0.7.6;
 
 pragma experimental ABIEncoderV2;
 
@@ -524,7 +524,7 @@ contract CouncilDilution is Owned {
     /* */
 
     // @notice Initialises the contract with a X number of council seats and a proposal period of 3 days
-    constructor(uint _numOfSeats) public Owned(msg.sender) {
+    constructor(uint _numOfSeats) Owned(msg.sender) {
         numOfSeats = _numOfSeats;
         proposalPeriod = 3 days;
     }
@@ -553,9 +553,12 @@ contract CouncilDilution is Owned {
         require(assignedVoteWeights.length > 0, "empty assignedVoteWeights array provided");
         require(nominatedCouncilMembers.length == numOfSeats, "invalid number of council members");
 
-        ElectionLog memory newElectionLog = ElectionLog(electionHash, now);
+        electionHashToLog[electionHash].electionHash = electionHash;
+        electionHashToLog[electionHash].created = block.timestamp;
 
-        electionHashToLog[electionHash] = newElectionLog;
+        // ElectionLog memory newElectionLog = ElectionLog(electionHash, block.timestamp);
+
+        // electionHashToLog[electionHash] = newElectionLog;
 
         // store the voting history for calculating the allocated voting weights
         for (uint i = 0; i < voters.length; i++) {
@@ -588,7 +591,7 @@ contract CouncilDilution is Owned {
         require(!proposalHashToLog[proposalHash].exist, "proposal hash is not unique");
         require(bytes(proposalHash).length > 0, "proposal hash must not be empty");
 
-        uint start = now;
+        uint start = block.timestamp;
 
         uint end = start + proposalPeriod;
 
@@ -617,7 +620,10 @@ contract CouncilDilution is Owned {
             latestDelegatedVoteWeight[msg.sender][memberToDilute] > 0,
             "sender has not delegated voting weight for member"
         );
-        require(now < proposalHashToLog[proposalHash].end, "dilution can only occur within the proposal voting period");
+        require(
+            block.timestamp < proposalHashToLog[proposalHash].end,
+            "dilution can only occur within the proposal voting period"
+        );
         require(hasAddressDilutedForProposal[proposalHash][msg.sender] == false, "sender has already diluted");
 
         if (proposalHashToMemberDilution[proposalHash][memberToDilute].exist) {
@@ -639,9 +645,15 @@ contract CouncilDilution is Owned {
             );
         } else {
             address[] memory dilutors;
-            DilutionReceipt memory newDilutionReceipt = DilutionReceipt(proposalHash, memberToDilute, 0, dilutors, true);
+            // DilutionReceipt memory newDilutionReceipt = DilutionReceipt(proposalHash, memberToDilute, 0, dilutors, true);
 
-            proposalHashToMemberDilution[proposalHash][memberToDilute] = newDilutionReceipt;
+            proposalHashToMemberDilution[proposalHash][memberToDilute].proposalHash = proposalHash;
+            proposalHashToMemberDilution[proposalHash][memberToDilute].memberDiluted = memberToDilute;
+            proposalHashToMemberDilution[proposalHash][memberToDilute].totalDilutionValue = 0;
+            proposalHashToMemberDilution[proposalHash][memberToDilute].dilutors = dilutors;
+            proposalHashToMemberDilution[proposalHash][memberToDilute].exist = true;
+
+            // proposalHashToMemberDilution[proposalHash][memberToDilute] = newDilutionReceipt;
 
             uint originalTotalDilutionValue = proposalHashToMemberDilution[proposalHash][memberToDilute].totalDilutionValue;
 
@@ -683,7 +695,10 @@ contract CouncilDilution is Owned {
                 hasAddressDilutedForProposal[proposalHash][msg.sender] == true,
             "voter has no dilution weight"
         );
-        require(now < proposalHashToLog[proposalHash].end, "undo dilution can only occur within the proposal voting period");
+        require(
+            block.timestamp < proposalHashToLog[proposalHash].end,
+            "undo dilution can only occur within the proposal voting period"
+        );
 
         address caller = msg.sender;
 
